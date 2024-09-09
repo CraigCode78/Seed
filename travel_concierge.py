@@ -20,12 +20,9 @@ mock_hotels = [
     {"name": "Budget Stay", "rating": 2, "price": 80},
 ]
 
-def get_ai_response(prompt, user_preferences, booking_stage=None):
+def get_ai_response(prompt, user_preferences):
     try:
-        system_message = f"You are an expert AI travel concierge. Provide detailed, informative, and engaging responses about travel destinations, cultural insights, local customs, travel tips, and personalized recommendations. Consider the user's preferences: {user_preferences}."
-        
-        if booking_stage:
-            system_message += f" The user is currently in the booking process at stage: {booking_stage}. Guide them through this stage and ask for necessary information."
+        system_message = f"You are an expert AI travel concierge. Provide detailed, informative, and engaging responses about travel destinations, cultural insights, local customs, travel tips, and personalized recommendations. Consider the user's preferences: {user_preferences}. If appropriate, suggest specific hotels or activities that the user might be interested in booking."
         
         messages = [
             {"role": "system", "content": system_message},
@@ -76,26 +73,13 @@ def initial_questionnaire():
         st.session_state.questionnaire_completed = True
         st.rerun()
 
-def display_flight_options():
-    st.subheader("Available Flights")
-    for i, flight in enumerate(mock_flights):
-        st.write(f"{i+1}. {flight['airline']} - Departure: {flight['departure']}, Arrival: {flight['arrival']}, Price: ${flight['price']}")
-    choice = st.selectbox("Select a flight", options=[1, 2, 3])
-    return mock_flights[choice-1]
-
-def display_hotel_options():
-    st.subheader("Available Hotels")
-    for i, hotel in enumerate(mock_hotels):
-        st.write(f"{i+1}. {hotel['name']} - Rating: {hotel['rating']} stars, Price: ${hotel['price']}/night")
-    choice = st.selectbox("Select a hotel", options=[1, 2, 3])
-    return mock_hotels[choice-1]
-
 def simulate_booking_process():
+    st.subheader("Booking Process")
+    
     if 'booking_stage' not in st.session_state:
         st.session_state.booking_stage = 'destination'
 
     if st.session_state.booking_stage == 'destination':
-        st.subheader("Where would you like to go?")
         destination = st.text_input("Enter your destination")
         if st.button("Next"):
             st.session_state.destination = destination
@@ -103,7 +87,6 @@ def simulate_booking_process():
             st.rerun()
 
     elif st.session_state.booking_stage == 'dates':
-        st.subheader("When would you like to travel?")
         start_date = st.date_input("Start date", datetime.now() + timedelta(days=30))
         end_date = st.date_input("End date", start_date + timedelta(days=7))
         if st.button("Next"):
@@ -113,23 +96,27 @@ def simulate_booking_process():
             st.rerun()
 
     elif st.session_state.booking_stage == 'flight':
-        st.subheader("Let's choose a flight")
-        selected_flight = display_flight_options()
+        st.write("Available Flights:")
+        for i, flight in enumerate(mock_flights):
+            st.write(f"{i+1}. {flight['airline']} - Departure: {flight['departure']}, Arrival: {flight['arrival']}, Price: ${flight['price']}")
+        choice = st.selectbox("Select a flight", options=[1, 2, 3])
         if st.button("Book Flight"):
-            st.session_state.selected_flight = selected_flight
+            st.session_state.selected_flight = mock_flights[choice-1]
             st.session_state.booking_stage = 'hotel'
             st.rerun()
 
     elif st.session_state.booking_stage == 'hotel':
-        st.subheader("Now, let's choose a hotel")
-        selected_hotel = display_hotel_options()
+        st.write("Available Hotels:")
+        for i, hotel in enumerate(mock_hotels):
+            st.write(f"{i+1}. {hotel['name']} - Rating: {hotel['rating']} stars, Price: ${hotel['price']}/night")
+        choice = st.selectbox("Select a hotel", options=[1, 2, 3])
         if st.button("Book Hotel"):
-            st.session_state.selected_hotel = selected_hotel
+            st.session_state.selected_hotel = mock_hotels[choice-1]
             st.session_state.booking_stage = 'confirmation'
             st.rerun()
 
     elif st.session_state.booking_stage == 'confirmation':
-        st.subheader("Booking Confirmation")
+        st.write("Booking Confirmation:")
         st.write(f"Destination: {st.session_state.destination}")
         st.write(f"Dates: {st.session_state.start_date} to {st.session_state.end_date}")
         st.write(f"Flight: {st.session_state.selected_flight['airline']} - ${st.session_state.selected_flight['price']}")
@@ -139,6 +126,7 @@ def simulate_booking_process():
         if st.button("Confirm Booking"):
             st.success("Booking confirmed! (This is a simulation, no actual booking has been made)")
             st.session_state.booking_stage = 'completed'
+            st.rerun()
 
     return st.session_state.booking_stage
 
@@ -164,9 +152,6 @@ def main_chat_interface():
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Simulate booking process
-    booking_stage = simulate_booking_process()
-
     # React to user input
     if prompt := st.chat_input("What would you like to know about travel?"):
         # Display user message in chat message container
@@ -177,12 +162,21 @@ def main_chat_interface():
         # Display assistant response in chat message container
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
-            for response in get_ai_response(prompt, st.session_state.user_preferences, booking_stage):
+            for response in get_ai_response(prompt, st.session_state.user_preferences):
                 response_placeholder.markdown(response + "▌")
             response_placeholder.markdown(response)
         
         # Add assistant response to chat history
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+        # Offer booking option after AI response
+        if st.button("Would you like to book any of the suggested options?"):
+            st.session_state.show_booking = True
+            st.rerun()
+
+    # Show booking process if requested
+    if st.session_state.get('show_booking', False):
+        simulate_booking_process()
 
 # Main app logic
 if 'questionnaire_completed' not in st.session_state:
