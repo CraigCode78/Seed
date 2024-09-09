@@ -3,9 +3,37 @@ from openai import OpenAI
 import os
 import random
 from datetime import datetime, timedelta
+import re
+import time
+
+# OpenAI key management
+def get_openai_key():
+    # First, try to get the key from environment variables
+    api_key = os.environ.get('OPENAI_API_KEY')
+    
+    # If not found in environment variables, try Streamlit secrets
+    if not api_key:
+        try:
+            api_key = st.secrets.get("OPENAI_API_KEY")
+        except FileNotFoundError:
+            # If running locally and secrets file is not found, use a text input
+            st.warning("OpenAI API key not found in environment variables or Streamlit secrets.")
+            api_key = st.text_input("Please enter your OpenAI API key:", type="password")
+            if api_key:
+                # Save the entered key to session state for reuse
+                st.session_state['openai_api_key'] = api_key
+            elif 'openai_api_key' in st.session_state:
+                # Reuse the previously entered key if available
+                api_key = st.session_state['openai_api_key']
+    
+    if not api_key:
+        st.error("OpenAI API key is required to run this application.")
+        st.stop()
+    
+    return api_key
 
 # Initialize the OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=get_openai_key())
 
 # Mock data for simulated booking
 mock_flights = [
@@ -22,7 +50,7 @@ mock_hotels = [
 
 def get_ai_response(prompt, user_preferences):
     try:
-        system_message = f"You are an expert AI travel concierge. Provide detailed, informative, and engaging responses about travel destinations, cultural insights, local customs, travel tips, and personalized recommendations. Consider the user's preferences: {user_preferences}. If appropriate, suggest specific hotels or activities that the user might be interested in booking."
+        system_message = f"You are an expert AI travel concierge. Provide detailed, informative, and engaging responses about travel destinations, cultural insights, local customs, travel tips, and personalized recommendations. Consider the user's preferences: {user_preferences}. If appropriate, suggest 3 specific hotels that the user might be interested in, formatting them as 'Hotel: [Hotel Name]' on separate lines."
         
         messages = [
             {"role": "system", "content": system_message},
@@ -40,6 +68,9 @@ def get_ai_response(prompt, user_preferences):
             if chunk.choices[0].delta.content is not None:
                 full_response += chunk.choices[0].delta.content
                 yield full_response
+        
+        hotel_suggestions = re.findall(r'Hotel: (.*)', full_response)
+        st.session_state.suggested_hotels = hotel_suggestions
         
     except Exception as e:
         yield f"An error occurred: {str(e)}"
@@ -73,110 +104,122 @@ def initial_questionnaire():
         st.session_state.questionnaire_completed = True
         st.rerun()
 
-def simulate_booking_process():
-    st.subheader("Booking Process")
-    
-    if 'booking_stage' not in st.session_state:
-        st.session_state.booking_stage = 'destination'
-
-    if st.session_state.booking_stage == 'destination':
-        destination = st.text_input("Enter your destination")
-        if st.button("Next"):
-            st.session_state.destination = destination
-            st.session_state.booking_stage = 'dates'
-            st.rerun()
-
-    elif st.session_state.booking_stage == 'dates':
-        start_date = st.date_input("Start date", datetime.now() + timedelta(days=30))
-        end_date = st.date_input("End date", start_date + timedelta(days=7))
-        if st.button("Next"):
-            st.session_state.start_date = start_date
-            st.session_state.end_date = end_date
-            st.session_state.booking_stage = 'flight'
-            st.rerun()
-
-    elif st.session_state.booking_stage == 'flight':
-        st.write("Available Flights:")
-        for i, flight in enumerate(mock_flights):
-            st.write(f"{i+1}. {flight['airline']} - Departure: {flight['departure']}, Arrival: {flight['arrival']}, Price: ${flight['price']}")
-        choice = st.selectbox("Select a flight", options=[1, 2, 3])
-        if st.button("Book Flight"):
-            st.session_state.selected_flight = mock_flights[choice-1]
-            st.session_state.booking_stage = 'hotel'
-            st.rerun()
-
-    elif st.session_state.booking_stage == 'hotel':
-        st.write("Available Hotels:")
-        for i, hotel in enumerate(mock_hotels):
-            st.write(f"{i+1}. {hotel['name']} - Rating: {hotel['rating']} stars, Price: ${hotel['price']}/night")
-        choice = st.selectbox("Select a hotel", options=[1, 2, 3])
-        if st.button("Book Hotel"):
-            st.session_state.selected_hotel = mock_hotels[choice-1]
-            st.session_state.booking_stage = 'confirmation'
-            st.rerun()
-
-    elif st.session_state.booking_stage == 'confirmation':
-        st.write("Booking Confirmation:")
-        st.write(f"Destination: {st.session_state.destination}")
-        st.write(f"Dates: {st.session_state.start_date} to {st.session_state.end_date}")
-        st.write(f"Flight: {st.session_state.selected_flight['airline']} - ${st.session_state.selected_flight['price']}")
-        st.write(f"Hotel: {st.session_state.selected_hotel['name']} - ${st.session_state.selected_hotel['price']}/night")
-        total_cost = st.session_state.selected_flight['price'] + (st.session_state.selected_hotel['price'] * (st.session_state.end_date - st.session_state.start_date).days)
-        st.write(f"Total Cost: ${total_cost}")
-        if st.button("Confirm Booking"):
-            st.success("Booking confirmed! (This is a simulation, no actual booking has been made)")
-            st.session_state.booking_stage = 'completed'
-            st.rerun()
-
-    return st.session_state.booking_stage
-
 def main_chat_interface():
-    st.title("AI Travel Concierge (Powered by GPT-4)")
+    st.title("AI Travel Concierge (Powered by GPT-4 Turbo)")
 
-    st.markdown("""
-    This AI Travel Concierge uses GPT-4 to provide you with expert travel advice, recommendations, and insights. 
-    Your responses will be personalized based on your preferences.
-    """)
+    # Display confirmed booking at the top if it exists
+    if st.session_state.get('confirmed_booking'):
+        with st.expander("Your Confirmed Booking", expanded=True):
+            for key, value in st.session_state.confirmed_booking.items():
+                st.write(f"{key}: {value}")
+            if st.button("Clear Booking"):
+                del st.session_state.confirmed_booking
+                st.rerun()
 
-    # Display user preferences
-    st.sidebar.title("Your Travel Preferences")
-    for key, value in st.session_state.user_preferences.items():
-        st.sidebar.write(f"{key.replace('_', ' ').title()}: {value}")
-
-    # Initialize chat history
+    # Chat interface
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages from history on app rerun
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # React to user input
-    if prompt := st.chat_input("What would you like to know about travel?"):
-        # Display user message in chat message container
+    # Show booking process after AI response if hotels were suggested
+    if st.session_state.get('show_booking', False):
+        show_booking_process()
+
+    # Updated chat input prompt
+    if prompt := st.chat_input("How can I help you with your travel plans today?"):
         st.chat_message("user").markdown(prompt)
-        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        # Display assistant response in chat message container
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             for response in get_ai_response(prompt, st.session_state.user_preferences):
                 response_placeholder.markdown(response + "▌")
             response_placeholder.markdown(response)
         
-        # Add assistant response to chat history
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-        # Offer booking option after AI response
-        if st.button("Would you like to book any of the suggested options?"):
+        # Check if hotels were suggested and set show_booking to True
+        if st.session_state.get('suggested_hotels', []):
             st.session_state.show_booking = True
-            st.rerun()
 
-    # Show booking process if requested
-    if st.session_state.get('show_booking', False):
-        simulate_booking_process()
+        st.rerun()
+
+def show_booking_process():
+    with st.expander("Book a Hotel", expanded=True):
+        form_key = f"booking_form_{int(time.time())}_{random.randint(0, 1000)}"
+        
+        with st.form(form_key):
+            st.subheader("Book Your Hotel")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input("Check-in date", value=datetime.now() + timedelta(days=30))
+            with col2:
+                end_date = st.date_input("Check-out date", value=start_date + timedelta(days=7))
+
+            suggested_hotels = st.session_state.get('suggested_hotels', [])
+            hotel_options = [
+                {
+                    "name": hotel,
+                    "rating": random.randint(3, 5),
+                    "price": random.randint(100, 500)
+                } for hotel in suggested_hotels
+            ]
+
+            hotel_display = [f"{hotel['name']} - Rating: {hotel['rating']} stars, Price: ${hotel['price']}/night" for hotel in hotel_options]
+            selected_hotel = st.selectbox("Select a hotel", options=hotel_display)
+
+            if st.form_submit_button("Confirm Booking"):
+                selected_hotel_info = hotel_options[hotel_display.index(selected_hotel)]
+                total_nights = (end_date - start_date).days
+                total_cost = selected_hotel_info['price'] * total_nights
+
+                booking_details = {
+                    "Hotel": selected_hotel_info['name'],
+                    "Check-in": start_date.strftime("%Y-%m-%d"),
+                    "Check-out": end_date.strftime("%Y-%m-%d"),
+                    "Total nights": total_nights,
+                    "Price per night": f"${selected_hotel_info['price']}",
+                    "Total cost": f"${total_cost}"
+                }
+
+                st.session_state.confirmed_booking = booking_details
+                st.session_state.show_booking = False
+                confirm_booking_and_continue()
+                st.rerun()
+
+def confirm_booking_and_continue():
+    booking = st.session_state.confirmed_booking
+    prompt = f"""
+    Great news! I've successfully booked your hotel. Here are the details:
+
+    Hotel: {booking['Hotel']}
+    Check-in: {booking['Check-in']}
+    Check-out: {booking['Check-out']}
+    Total nights: {booking['Total nights']}
+    Price per night: {booking['Price per night']}
+    Total cost: {booking['Total cost']}
+
+    Is there anything else I can help you with for your trip? Perhaps you'd like to:
+    1. Book an activity or tour
+    2. Get restaurant recommendations
+    3. Learn about local transportation options
+    4. Discover more about the local culture and customs
+    5. Find out about nearby attractions or day trip ideas
+
+    What would you like to explore next?
+    """
+    
+    with st.chat_message("assistant"):
+        response_placeholder = st.empty()
+        for response in get_ai_response(prompt, st.session_state.user_preferences):
+            response_placeholder.markdown(response + "▌")
+        response_placeholder.markdown(response)
+    
+    st.session_state.messages.append({"role": "assistant", "content": response})
 
 # Main app logic
 if 'questionnaire_completed' not in st.session_state:
