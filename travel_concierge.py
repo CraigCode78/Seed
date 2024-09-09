@@ -105,7 +105,7 @@ def initial_questionnaire():
         st.rerun()
 
 def main_chat_interface():
-    st.title("AI Travel Concierge (Powered by GPT-4 Turbo)")
+    st.title("Seed AI Travel Concierge (Powered by AI)")
 
     # Display confirmed booking at the top if it exists
     if st.session_state.get('confirmed_booking'):
