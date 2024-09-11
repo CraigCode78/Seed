@@ -5,6 +5,7 @@ import random
 from datetime import datetime, timedelta
 import re
 import time
+import tempfile
 
 # OpenAI key management
 def get_openai_key():
@@ -48,13 +49,15 @@ mock_hotels = [
     {"name": "Budget Stay", "rating": 2, "price": 80},
 ]
 
-def get_ai_response(prompt, user_preferences):
+def get_ai_response(prompt, user_preferences, language="English"):
     try:
-        system_message = f"You are an expert AI travel concierge. Provide detailed, informative, and engaging responses about travel destinations, cultural insights, local customs, travel tips, and personalized recommendations. Consider the user's preferences: {user_preferences}. If appropriate, suggest 3 specific hotels that the user might be interested in, formatting them as 'Hotel: [Hotel Name]' on separate lines."
+        system_message = f"""You are an expert AI travel concierge. Provide detailed, informative, and engaging responses about travel destinations, cultural insights, local customs, travel tips, and personalized recommendations. Consider the user's preferences: {user_preferences}. If appropriate, suggest 3 specific hotels that the user might be interested in, formatting them as 'Hotel: [Hotel Name]' on separate lines. 
+
+        Important: Respond in {language}. Translate all your responses, including hotel names and any specific terms, into {language}."""
         
         messages = [
             {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": f"Respond in {language}: {prompt}"}
         ]
         
         response = client.chat.completions.create(
@@ -104,8 +107,28 @@ def initial_questionnaire():
         st.session_state.questionnaire_completed = True
         st.rerun()
 
+def text_to_speech(text, voice):
+    try:
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text,
+            response_format="mp3"
+        )
+        
+        # Create a temporary file to store the audio
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+            for chunk in response.iter_bytes(chunk_size=4096):
+                tmp_file.write(chunk)
+            tmp_file_path = tmp_file.name
+        
+        return tmp_file_path
+    except Exception as e:
+        st.error(f"An error occurred during text-to-speech conversion: {str(e)}")
+        return None
+
 def main_chat_interface():
-    st.title("Seed AI Travel Concierge (Powered by AI)")
+    st.title("AI Travel Concierge (Powered by GPT-4 Turbo)")
 
     # Display confirmed booking at the top if it exists
     if st.session_state.get('confirmed_booking'):
@@ -123,6 +146,18 @@ def main_chat_interface():
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            if message["role"] == "assistant":
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    voice = st.selectbox("Select voice", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"], key=f"voice_{len(st.session_state.messages)}")
+                with col2:
+                    if st.button("🔊 Listen", key=f"listen_{len(st.session_state.messages)}"):
+                        with st.spinner("Generating audio..."):
+                            audio_file_path = text_to_speech(message["content"], voice)
+                        if audio_file_path:
+                            st.audio(audio_file_path, format="audio/mp3")
+                            # Clean up the temporary file
+                            os.remove(audio_file_path)
 
     # Show booking process after AI response if hotels were suggested
     if st.session_state.get('show_booking', False):
@@ -135,7 +170,8 @@ def main_chat_interface():
 
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
-            for response in get_ai_response(prompt, st.session_state.user_preferences):
+            language = st.selectbox("Select response language", ["English", "Spanish", "French", "German", "Chinese", "Japanese"])
+            for response in get_ai_response(prompt, st.session_state.user_preferences, language):
                 response_placeholder.markdown(response + "▌")
             response_placeholder.markdown(response)
         
